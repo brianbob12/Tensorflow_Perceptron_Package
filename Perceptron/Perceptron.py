@@ -26,7 +26,7 @@ class Perceptron:
     # bare init function becuase of the option to import exsisting network from a folder
     def __init__(self):
         #initalise a map of string to function for activation fuctions
-        self.activationLookup={"relu":relu,"liniar":self.liniar,"sigmoid":sigmoid}
+        self.activationLookup={"relu":relu,"linear":self.linear,"sigmoid":sigmoid,"tanh":tanh}
 
     #create a new neural network based on hyperperameters given as arguments
     def newNetwork(self,inputSize,outputSize,nHidden,activation):
@@ -70,32 +70,36 @@ class Perceptron:
             out.append(self.biases[i])
         return out
 
-    #liniar function returns iput
+    #liniar function returns input
     @function
-    def liniar(self,x):
+    def linear(self,x):
         return(x)
 
     #evaluates the network for a list of inputs
     #forward propagation
     @function
     def evaluate(self,x):
+        #print(x)#for debug
         #note: x has shape(batchsizse,inputSize)
         #ensure that layers are floats
         layerVals=[x]# a list of the neruon value for each x
         #[first set of input layer vaues,second set of input layer values]
         for i in range(len(self.nHidden)+1):#for each hidden layer and the output layer
             layerVals.append(self.activationLookup[self.activation[i]](matmul(layerVals[-1],self.weights[i])+self.biases[i]))#I love Tensorflow 2!
-
         #return final layer as output layer
         return layerVals[-1]
 
     #train a nerual netwrok to fit the data provided
-    #returns MSE
-    def train(self,X,Y,learningRate,L2val):
+    #returns squared error
+    #only trianes for one Yindex(Yi) per training example
+    def train(self,X,Y,Yi,learningRate,L2val):
+
+        #very sorry L2 is currtently out of order I will fix this later
+
         #apply L2 regularization to avoid overfitting
         #this is really really important
-        regularizer=l2(L2val)#just ot be clear this is tf.keras.regularizers.l2
-        regularizer(self.weights)
+        #regularizer=l2(L2val)#just to be clear this is tf.keras.regularizers.l2
+        #regularizer(self.weights)
 
         #compute gradients of weights and biases
         with GradientTape() as g:
@@ -104,10 +108,10 @@ class Perceptron:
 
             #calculate error
             guess=self.evaluate(X)
-            #calculate error using MSE
+            #calculate error using sqared error
             error=0
             for i in range(len(Y)):
-                error+=(guess[i]-Y[i])**2
+                error+=(guess[i][Yi[i]]-Y[i][Yi[i]])**2
             error=error/len(Y)
 
         optimizer=Adam(learningRate)
@@ -116,7 +120,7 @@ class Perceptron:
         return error
 
     #export currently loaded network to file
-    def export(self,path):
+    def export(self,path):#throws IOerror
         import os
         try:
             os.mkdir(path)
@@ -142,24 +146,24 @@ class Perceptron:
                     f.write(",")
             f.write("\n")
 
+
         #set weight and bias files as comma sperated values
         #note: some percision will be lost when converting binary floats to strings
         for i in range(len(self.nHidden)+1):
-            with open(path+"\\w"+str(i)+".csv","w") as f:
+            out=[]
+            with open(path+"\\w"+str(i)+".weights","wb") as f:
                 for j in range(self.weights[i].get_shape()[0]):
                     for k in range(self.weights[i][j].get_shape()[0]):
-                        f.write(str(float(self.weights[i][j][k])))
-                        if k+1!=self.weights[i][j].get_shape()[0]:
-                            f.write(",")
-                    f.write("\n")
-            with open(path+"\\b"+str(i)+".csv","w") as f:
+                        out.append(float(self.weights[i][j][k]))
+                f.write(bytearray(struct.pack(str(len(out))+"f",*out)))
+            out=[]
+            with open(path+"\\b"+str(i)+".biases","wb") as f:
                 for j in range(self.biases[i].get_shape()[0]):
-                    f.write(str(float(self.biases[i][j])))
-                    if j+1!= self.biases[i].get_shape()[0]:
-                        f.write(",")
+                    out.append(float(self.biases[i][j]))
+                f.write(bytearray(struct.pack(str(len(out))+"f",*out)))
 
     #import a network of the format given above
-    def importNetwork(self,path):
+    def importNetwork(self,path):#throws IOerror and byte error
         #check if the path is real
         import os
         if(not os.path.exists(path)):
@@ -189,17 +193,94 @@ class Perceptron:
         #initalise variables
         self.biases=[]
         self.weights=[]
+        #I know this is a little messy. It is the same segment three times
+        try:
+            with open(path+"\\w0.weights","rb") as f:
+                raw=f.read()#type of bytes
+                inp=struct.unpack(str(self.inputSize*self.nHidden[0])+"f",raw)#list of int
+                tad=[]
+                for j in range(self.inputSize):
+                    tad2=[]
+                    for k in range(self.nHidden[0]):
+                        tad2.append(inp[j*self.nHidden[0]+k])
+                    tad.append(tad2)
+                self.weights.append(Variable(tad))
+        except IOError:
+            raise(missingFile(path,path+"\\w0.weights"))
+        try:
+            with open(path+"\\b0.biases","rb") as f:
+                raw=f.read()#type of bytes
+                inp=struct.unpack(str(self.nHidden[0])+"f",raw)#list of floats
+                self.biases.append(Variable([i for i in inp]))
 
+        except IOError:
+            raise(missingFile(path,path+"\\b0.bases"))
 
-        for i in range(len(self.nHidden)+1):
+        for i in range(1,len(self.nHidden)):
             try:
-                with open(path+"\\w"+str(i)+".csv","r") as f:
-                    self.weights.append(Variable([[float(k) for k in j.split(",")] for j in f.readlines()]))
+                with open(path+"\\w"+str(i)+".weights","rb") as f:
+                    raw=f.read()#type of bytes
+                    #print(path+"\\w"+str(i)+".weights")#DEBUG
+                    inp=struct.unpack(str(self.nHidden[i-1]*self.nHidden[i])+"f",raw)#list of int
+                    tad=[]
+                    for j in range(self.nHidden[i-1]):
+                        tad2=[]
+                        for k in range(self.nHidden[i]):
+                            tad2.append(inp[j*self.nHidden[i]+k])
+                        tad.append(tad2)
+                    self.weights.append(Variable(tad))
+
             except IOError:
-                raise(missingFile(path,path+"\\w"+str(i)+".csv"))
+                raise(missingFile(path,path+"\\w"+str(i)+".weights"))
 
             try:
-                with open(path+"\\b"+str(i)+".csv","r") as f:
-                    self.biases.append(Variable([[float(k) for k in j.split(",")] for j in f.readlines()]))
+                with open(path+"\\b"+str(i)+".biases","rb") as f:
+                    raw=f.read()#type of bytes
+                    inp=struct.unpack(str(self.nHidden[i])+"f",raw)#list of int
+                    self.biases.append(Variable([i for i in inp]))
+
             except IOError:
-                raise(missingFile(path,path+"\\b"+str(i)+".csv"))
+                raise(missingFile(path,path+"\\b"+str(i)+".bases"))
+
+        try:
+            with open(path+"\\w"+str(len(self.nHidden))+".weights","rb") as f:
+                raw=f.read()#type of bytes
+                inp=struct.unpack(str(self.nHidden[-1]*self.outputSize)+"f",raw)#list of int
+                tad=[]
+                for j in range(self.nHidden[-1]):
+                    tad2=[]
+                    for k in range(self.outputSize):
+                        tad2.append(inp[j*self.outputSize+k])
+                    tad.append(tad2)
+                self.weights.append(Variable(tad))
+
+        except IOError:
+            raise(missingFile(path,path+"\\w"+str(len(self.nHidden))+".weights"))
+        try:
+            with open(path+"\\b"+str(len(self.nHidden))+".biases","rb") as f:
+                raw=f.read()#type of bytes
+                inp=struct.unpack(str(self.outputSize)+"f",raw)#list of int
+                self.biases.append(Variable([i for i in inp]))
+
+        except IOError:
+            raise(missingFile(path,path+"\\b"+str(len(self.nHidden))+".bases"))
+
+    #return deepcopy of self
+    def deepcopy(self):
+
+        import copy
+
+        out=Perceptron()
+        out.inputSize=self.inputSize#int so no copy needed
+        out.outputSize=self.outputSize#int so no copy needed
+        out.nHidden=copy.deepcopy(self.nHidden)
+        out.activation=copy.deepcopy(self.activation)
+
+        try:
+            out.weights=copy.deepcopy(self.weights)
+            out.biases=copy.deepcopy(self.biases)
+        except:
+            #weights and biases not initialized
+            pass
+
+        return out
