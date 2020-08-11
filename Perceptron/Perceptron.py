@@ -1,6 +1,7 @@
 #
 #
 #@author cyrus singer
+#Robot_Gym version 0.1
 #
 #
 
@@ -11,8 +12,11 @@ from tensorflow.random import truncated_normal
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.optimizers import Adam
 from tensorflow.nn import relu,sigmoid
+from tensorflow.math import tanh
+from tensorflow import function
 import numpy#this is actually a dependancy of tensorflow
-from Exceptions import *
+import struct#for export and import
+from .Exceptions import *
 
 #
 #Network
@@ -107,7 +111,7 @@ class Perceptron:
                 g.watch(self.getTrainableVariables())
 
             #calculate error
-            guess=self.evaluate(X)
+            guess=self.evaluate([[constant(j) for j in i] for i in X])#convert everything in x to tensorflow format
             #calculate error using sqared error
             error=0
             for i in range(len(Y)):
